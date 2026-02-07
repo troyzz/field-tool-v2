@@ -11,9 +11,9 @@ st.set_page_config(page_title="Field Mapper PRO", layout="wide")
 # --- 1. PERSISTENT STORAGE ---
 SAVED_DATA = "permanent_work_log.csv"
 
-# We use a dictionary in 'session_state' to hold the actual photo data
+# Initialize photo storage in session state
 if 'all_photos' not in st.session_state:
-    st.session_state.all_photos = {} # Format: {"Ticket123": [file1, file2]}
+    st.session_state.all_photos = {}
 
 def save_progress():
     st.session_state.df.to_csv(SAVED_DATA, index=False)
@@ -68,13 +68,19 @@ if st.session_state.selected_id:
     
     st.sidebar.header(f"📍 Ticket: {t_id}")
     nav_url = f"https://www.google.com/maps/dir/?api=1&destination={sel_row['lat']},{sel_row['lon']}&travelmode=driving"
-    st.sidebar.link_button("🚗 Start Nav", nav_url)
+    st.sidebar.link_button("🚗 Start Google Maps Nav", nav_url)
     
-    # Accept multiple photos from native camera
-    photos = st.sidebar.file_uploader("Upload Photos", accept_multiple_files=True, key=f"p_{t_id}")
+    # Check if we already have photos for this ticket to prevent overwriting
+    existing_count = len(st.session_state.all_photos.get(t_id, []))
+    if existing_count > 0:
+        st.sidebar.info(f"📸 {existing_count} photos already uploaded for this site.")
+
+    photos = st.sidebar.file_uploader("Upload New Photos", accept_multiple_files=True, key=f"p_{t_id}")
+    
     if photos:
+        # We append/save these to the session state
         st.session_state.all_photos[t_id] = photos
-        st.sidebar.write(f"✅ {len(photos)} photos ready for {t_id}")
+        st.sidebar.success(f"Linked {len(photos)} photos to {t_id}")
 
     if st.sidebar.button("✅ Confirm Site Completion"):
         st.session_state.df.loc[st.session_state.df['Ticket'].astype(str) == t_id, 'status'] = 'Completed'
@@ -82,25 +88,32 @@ if st.session_state.selected_id:
         save_progress()
         st.rerun()
 
-# --- 5. THE ZIP EXPORTER ---
-st.sidebar.write("---")
-st.sidebar.subheader("📦 End of Shift")
+# --- 5. THE ZIP EXPORTER (Fixed Logic) ---
+st.sidebar.markdown("---")
+st.sidebar.subheader("📦 End of Shift Export")
 
-if st.session_state.all_photos:
+total_photos = sum(len(v) for v in st.session_state.all_photos.values())
+st.sidebar.write(f"Total photos in queue: **{total_photos}**")
+
+if total_photos > 0:
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
         for ticket, file_list in st.session_state.all_photos.items():
             for i, file_obj in enumerate(file_list):
-                # This is where the magic renaming happens!
-                new_name = f"{ticket}_{i+1}.jpg"
+                # Using a generic extension check
+                ext = file_obj.name.split('.')[-1]
+                new_name = f"{ticket}_{i+1}.{ext}"
                 z.writestr(new_name, file_obj.getvalue())
     
     st.sidebar.download_button(
         label="📥 Download All Renamed Photos (ZIP)",
         data=buf.getvalue(),
         file_name="Field_Photos_Today.zip",
-        mime="application/zip"
+        mime="application/zip",
+        use_container_width=True
     )
+else:
+    st.sidebar.warning("Upload photos to enable ZIP download.")
 
 if st.sidebar.button("🗑️ Reset Everything"):
     if os.path.exists(SAVED_DATA): os.remove(SAVED_DATA)
