@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import folium
-from streamlit_folium import st_folium
+from streamlit_folium import st_folium, folium_static  # Added folium_static
 import os
 
 st.set_page_config(page_title="Field Mapper PRO", layout="wide")
@@ -11,43 +11,28 @@ uploaded_file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
 
 if uploaded_file:
     try:
-        # Read the file
         df = pd.read_csv(uploaded_file)
-        
-        # CLEANING: Remove any rows that are completely empty
-        df = df.dropna(how='all')
-        
-        # POSITION FIX: Force the first 3 columns to be our data
-        df.columns.values[0] = "Ticket"
-        df.columns.values[1] = "lat"
-        df.columns.values[2] = "lon"
-        
-        # CONVERT TO NUMBERS: This is the critical part
+        df.columns.values[0], df.columns.values[1], df.columns.values[2] = "Ticket", "lat", "lon"
         df['lat'] = pd.to_numeric(df['lat'], errors='coerce')
         df['lon'] = pd.to_numeric(df['lon'], errors='coerce')
-        
-        # DROP BAD DATA: Remove rows where Lat or Lon failed to convert
         df = df.dropna(subset=['lat', 'lon'])
-        
-        if df.empty:
-            st.error("Wait! After cleaning, no valid coordinates were found. Check your CSV format.")
-            st.stop()
 
-        st.sidebar.success(f"Loaded {len(df)} locations!")
-        st.sidebar.write("Preview:", df[['Ticket', 'lat', 'lon']].head(3))
+        st.sidebar.success(f"Loaded {len(df)} locations")
         
-        # --- 2. THE MAP ---
+        # --- 2. MOBILE OPTIMIZATION SETTINGS ---
+        st.sidebar.title("📱 Mobile Settings")
+        use_static = st.sidebar.checkbox("Use Static Map (Fastest for Phone)", value=False)
+
+        # --- 3. THE MAP ---
         st.title("🛰️ Satellite Field View")
         
-        # Center the map on the first pin
-        m = folium.Map(location=[df['lat'].iloc[0], df['lon'].iloc[0]], zoom_start=15)
+        # Center the map
+        m = folium.Map(location=[df['lat'].mean(), df['lon'].mean()], zoom_start=13)
         
-        # Add Satellite Layer
+        # Satellite Layer
         folium.TileLayer(
             tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-            attr='Esri',
-            name='Satellite',
-            overlay=False
+            attr='Esri', name='Satellite', overlay=False
         ).add_to(m)
 
         for _, row in df.iterrows():
@@ -57,9 +42,15 @@ if uploaded_file:
                 icon=folium.Icon(color="blue", icon="info-sign")
             ).add_to(m)
 
-        st_folium(m, width="100%", height=600)
+        # --- 4. RENDER LOGIC ---
+        if use_static:
+            # This is the 'light' version for older phones
+            folium_static(m, width=350, height=500)
+        else:
+            # This is the 'pro' version - width=None is the mobile fix
+            st_folium(m, width=None, height=500, key="field_map")
 
     except Exception as e:
-        st.error(f"Critical Error: {e}")
+        st.error(f"Error: {e}")
 else:
-    st.info("Please upload your CSV file in the sidebar to begin.")
+    st.info("Please upload your CSV in the sidebar.")
