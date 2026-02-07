@@ -20,61 +20,75 @@ if 'df' not in st.session_state:
         st.rerun()
     st.stop()
 
-# Track which pin is currently tapped
+# Initialize selection state
 if 'selected_id' not in st.session_state:
     st.session_state.selected_id = None
 
 df = st.session_state.df
 
-# --- 2. THE MAP ---
-st.title("🛰️ Field Navigator & Mapper")
+# --- 2. THE MAP LOGIC ---
+st.title("🛰️ Field Navigator")
 
-# Center the map
+# Center calculation
 v_lat, v_lon = df['lat'].mean(), df['lon'].mean()
 m = folium.Map(location=[v_lat, v_lon], zoom_start=14)
 folium.TileLayer(tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
                  attr='Esri', name='Satellite', overlay=False).add_to(m)
 
 for _, row in df.iterrows():
-    # COLOR LOGIC: Green if done, Yellow if selected, Blue if pending
-    if str(row['Ticket']) == str(st.session_state.selected_id):
-        color = "orange" # Yellow/Orange for selection
+    # REFINED COLOR LOGIC
+    current_ticket = str(row['Ticket'])
+    is_selected = (current_ticket == str(st.session_state.selected_id))
+    
+    if is_selected:
+        color = "orange"  # This is our Yellow/Selection color
+        icon_type = "star"
+    elif row['status'] == 'Completed':
+        color = "green"
+        icon_type = "check"
     else:
-        color = "green" if row['status'] == 'Completed' else "blue"
+        color = "blue"
+        icon_type = "camera"
         
     folium.Marker(
         [row['lat'], row['lon']],
-        popup=f"ID:{row['Ticket']}",
-        icon=folium.Icon(color=color, icon="camera" if color != "orange" else "star")
+        popup=f"ID:{current_ticket}",
+        icon=folium.Icon(color=color, icon=icon_type)
     ).add_to(m)
 
+# Render Map
 map_data = st_folium(m, width=None, height=450, returned_objects=["last_object_clicked_popup"], key="pro_map")
 
-# --- 3. SIDEBAR: NAVIGATION & CAMERA ---
+# --- 3. HANDLE CLICKS & SIDEBAR ---
+# Check if a new pin was clicked
 if map_data and map_data.get("last_object_clicked_popup"):
-    t_id = map_data["last_object_clicked_popup"].split(":")[1]
-    st.session_state.selected_id = t_id # Set the yellow state
+    new_id = map_data["last_object_clicked_popup"].split(":")[1]
+    if st.session_state.selected_id != new_id:
+        st.session_state.selected_id = new_id
+        st.rerun() # Force the map to redraw with the orange pin
+
+if st.session_state.selected_id:
+    t_id = st.session_state.selected_id
+    selected_row = df[df['Ticket'].astype(str) == t_id].iloc[0]
     
-    row = df[df['Ticket'].astype(str) == t_id].iloc[0]
+    st.sidebar.markdown(f"## 📍 Selected: {t_id}")
     
-    st.sidebar.markdown(f"## 📍 Site: {t_id}")
-    
-    # NAVIGATION BUTTON
-    # This creates a special link that forces the Google Maps app to open
-    nav_url = f"https://www.google.com/maps/dir/?api=1&destination={row['lat']},{row['lon']}&travelmode=driving"
-    st.sidebar.link_button("🚗 Open Google Maps Nav", nav_url)
+    # NAVIGATION: Direct "Turn-by-Turn" Link
+    # This specific format is best for Android/Google Maps App
+    nav_url = f"https://www.google.com/maps/dir/?api=1&destination={selected_row['lat']},{selected_row['lon']}&travelmode=driving"
+    st.sidebar.link_button("🚗 Start Google Maps Nav", nav_url)
     
     st.sidebar.markdown("---")
     
-    # PHOTO LOGIC
-    st.sidebar.write("📸 **Take Photo:** Use your native camera app, then upload here for full quality/zoom:")
-    uploaded_photo = st.sidebar.file_uploader("Upload Site Photo", type=["jpg", "png", "jpeg"], key=f"file_{t_id}")
+    # UPLOAD FROM NATIVE CAMERA
+    st.sidebar.write("📸 **Capture Site:** Take photo with your phone app, then upload below:")
+    uploaded_photo = st.sidebar.file_uploader("Choose Photo", type=["jpg", "jpeg", "png"], key=f"file_{t_id}")
     
-    if st.sidebar.button("✅ Mark as Completed"):
+    if st.sidebar.button("✅ Confirm Completion"):
         st.session_state.df.loc[st.session_state.df['Ticket'].astype(str) == t_id, 'status'] = 'Completed'
-        st.session_state.selected_id = None # Clear selection
+        st.session_state.selected_id = None
         st.rerun()
 
-if st.sidebar.button("🗑️ Reset"):
+if st.sidebar.button("🗑️ Reset Map"):
     st.session_state.clear()
     st.rerun()
