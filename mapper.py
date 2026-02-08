@@ -6,10 +6,15 @@ import os
 import zipfile
 from io import BytesIO
 
-st.set_page_config(page_title="Field Mapper PRO", layout="wide")
+# --- 1. PAGE CONFIG & THEME ---
+st.set_page_config(
+    page_title="Troy's Fielding Tool", 
+    page_icon="🛰️", 
+    layout="wide"
+)
 
-# --- 1. PERSISTENT STORAGE ---
 SAVED_DATA = "permanent_work_log.csv"
+
 if 'all_photos' not in st.session_state:
     st.session_state.all_photos = {}
 if 'selected_id' not in st.session_state:
@@ -18,15 +23,23 @@ if 'selected_id' not in st.session_state:
 def save_progress():
     st.session_state.df.to_csv(SAVED_DATA, index=False)
 
-# --- 2. DATA LOADING ---
+# --- 2. DATA LOADING (Updated for Notes) ---
 if 'df' not in st.session_state:
     if os.path.exists(SAVED_DATA):
         st.session_state.df = pd.read_csv(SAVED_DATA)
     else:
-        uploaded_file = st.sidebar.file_uploader("Upload CSV to Start", type=["csv"])
+        uploaded_file = st.sidebar.file_uploader("Upload 4-Column CSV", type=["csv"])
         if uploaded_file:
             df = pd.read_csv(uploaded_file)
-            df.columns.values[0], df.columns.values[1], df.columns.values[2] = "Ticket", "lat", "lon"
+            # Standardize columns: Ticket, Lat, Lon, Notes
+            df.columns.values[0] = "Ticket"
+            df.columns.values[1] = "lat"
+            df.columns.values[2] = "lon"
+            if len(df.columns) > 3:
+                df.columns.values[3] = "Notes"
+            else:
+                df['Notes'] = "No notes provided."
+            
             df['lat'] = pd.to_numeric(df['lat'], errors='coerce')
             df['lon'] = pd.to_numeric(df['lon'], errors='coerce')
             df = df.dropna(subset=['lat', 'lon'])
@@ -38,7 +51,7 @@ if 'df' not in st.session_state:
 
 df = st.session_state.df
 
-# --- 3. SEARCH BOX ---
+# --- 3. SEARCH & MAP ---
 st.sidebar.markdown("## 🔍 Find Site")
 search_query = st.sidebar.text_input("Enter Ticket Number")
 
@@ -49,7 +62,6 @@ if search_query:
         st.session_state.selected_id = str(match.iloc[0]['Ticket'])
         m = folium.Map(location=[match.iloc[0]['lat'], match.iloc[0]['lon']], zoom_start=18)
 else:
-    # Auto-zoom to all pins if nothing searched
     sw, ne = df[['lat', 'lon']].min().values.tolist(), df[['lat', 'lon']].max().values.tolist()
     m.fit_bounds([sw, ne])
 
@@ -65,43 +77,43 @@ for _, row in df.iterrows():
 
 map_data = st_folium(m, width=None, height=450, returned_objects=["last_object_clicked_popup"], key="pro_map")
 
-# --- 4. SELECTION LOGIC ---
+# --- 4. SELECTION & UI (Updated with Notes Box) ---
 if map_data and map_data.get("last_object_clicked_popup"):
     new_id = map_data["last_object_clicked_popup"].split(":")[1]
     if st.session_state.selected_id != new_id:
         st.session_state.selected_id = new_id
         st.rerun()
 
-# --- 5. THE SIDEBAR ACTIONS ---
 if st.session_state.selected_id:
     t_id = st.session_state.selected_id
     sel_row = df[df['Ticket'].astype(str) == t_id].iloc[0]
     
     st.sidebar.markdown(f"### 📍 Site: {t_id}")
     
-    # NAVIGATION
+    # --- NEW NOTES FIELD ---
+    st.sidebar.markdown("#### 📝 Field Notes:")
+    site_notes = sel_row.get('Notes', 'No notes available.')
+    st.sidebar.info(f"{site_notes}")
+    # -----------------------
+
     nav_url = f"https://www.google.com/maps/dir/?api=1&destination={sel_row['lat']},{sel_row['lon']}&travelmode=driving"
-    st.sidebar.link_button("🚗 Start Google Maps Nav", nav_url)
+    st.sidebar.link_button("🚗 Start Google Maps Nav", nav_url, use_container_width=True)
     
-    # PHOTOS
     photos = st.sidebar.file_uploader("Upload From Gallery", accept_multiple_files=True, key=f"p_up_{t_id}")
     if photos:
         st.session_state.all_photos[t_id] = photos
-        st.sidebar.success(f"Linked {len(photos)} photos")
 
-    # COMPLETION BUTTON
     if st.sidebar.button("✅ Confirm Completion", use_container_width=True):
         st.session_state.df.loc[st.session_state.df['Ticket'].astype(str) == t_id, 'status'] = 'Completed'
         st.session_state.selected_id = None
         save_progress()
         st.rerun()
 
-    # THE "OOPS" BUTTON (Revert to Blue)
     if st.sidebar.button("🔙 Deselect / Go Back", use_container_width=True):
         st.session_state.selected_id = None
         st.rerun()
 
-# --- 6. EXPORT ---
+# --- 5. EXPORT ---
 st.sidebar.markdown("---")
 total_photos = sum(len(v) for v in st.session_state.all_photos.values())
 if total_photos > 0:
